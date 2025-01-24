@@ -275,17 +275,47 @@ def copy_files(files, destination, overwrite):
     print("Files copied successfully.")
 
 
-# ### Copy the files
+# ## Verify that there are no duplicate data
+
+# ### Make a function for verification
 
 # In[22]:
 
 
-REPLACE_FILES = False
+def check_all_hashes(mri_split_path):
+    all_hashes = set()
+    duplicates = []
+    for root, dirs, files in os.walk(mri_split_path):
+        for file in files:
+            filepath = os.path.join(root, file)
+            file_hash = hash_file(filepath)
+            if file_hash in all_hashes:
+                duplicates.append(filepath)
+            else:
+                all_hashes.add(file_hash)
+    print(f"Total duplicates found: {len(duplicates)}")
+    return duplicates
+
+
+# ### Copy the files
+
+# In[23]:
+
+
+REPLACE_FILES = True
+
 # Copy CT files
+copy_files([], train_ct_path, REPLACE_FILES)  # Wipe directories
+copy_files([], test_ct_path, REPLACE_FILES)
+
 copy_files(train_CT, train_ct_path, REPLACE_FILES)
 copy_files(test_CT, test_ct_path, REPLACE_FILES)
 
-# Copy MRI files
+# Copy MRI files and clean
+
+copy_files([], train_mri_path, REPLACE_FILES)  # Wipe directories
+copy_files([], test_mri_path, REPLACE_FILES)
+
 copy_files(train_MRI, train_mri_path, REPLACE_FILES)
 copy_files(test_MRI, test_mri_path, REPLACE_FILES)
 
@@ -296,7 +326,7 @@ inspect_data(path)
 
 # ### Import necessary libraries
 
-# In[23]:
+# In[24]:
 
 
 from torchvision import transforms
@@ -304,7 +334,7 @@ from torchvision import transforms
 
 # ### Implement a simple trivial augment
 
-# In[24]:
+# In[25]:
 
 
 data_transform_trivial = transforms.Compose([
@@ -323,7 +353,7 @@ data_transform_trivial = transforms.Compose([
 
 # ### Import necessary libraries
 
-# In[25]:
+# In[26]:
 
 
 from torchvision import datasets
@@ -331,7 +361,7 @@ from torchvision import datasets
 
 # ### Create the datasets
 
-# In[26]:
+# In[27]:
 
 
 train_CT_dataset = datasets.ImageFolder(
@@ -359,13 +389,13 @@ test_MRI_dataset = datasets.ImageFolder(
 
 # ### Import necessary libraries
 
-# In[27]:
+# In[28]:
 
 
 from torch.utils.data import DataLoader
 
 
-# In[28]:
+# In[29]:
 
 
 train_CT_dataloader = DataLoader(
@@ -407,7 +437,7 @@ test_MRI_dataloader = DataLoader(
 
 # ## Import necessary libraries
 
-# In[29]:
+# In[30]:
 
 
 import torch
@@ -417,7 +447,7 @@ from torchvision import models
 from safetensors.torch import save_file, load_file
 
 
-# In[30]:
+# In[31]:
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -428,7 +458,7 @@ device
 
 # ### Make a function to make a modified ResNet50 model
 
-# In[31]:
+# In[32]:
 
 
 def make_modified_resnet50(device, load=False, statedict=None):
@@ -450,69 +480,59 @@ tumor_classifier_resnet_0 = make_modified_resnet50(device)
 
 # ## Create Training and Testing functions
 
-# In[32]:
+# In[33]:
 
 
-def train_model(model, dataloader, criterion, optimizer, device, num_epochs=10):
+def train_model(model, dataloader, criterion, device, num_epochs=10, lr=0.001):
     model = model.to(device) 
     model.train()
-
+    
+    # Automatically create Adam optimizer with specified learning rate
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    
     for epoch in tqdm(range(num_epochs)):
-        
         running_loss = 0.0
         
         for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
             
-            inputs, labels = inputs.to(device), labels.to(device)  # Data to device
-
             optimizer.zero_grad()
-            
             outputs = model(inputs)
-            
             loss = criterion(outputs, labels)
-            
             loss.backward()
-            
             optimizer.step()
-
+            
             running_loss += loss.item()
 
         print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(dataloader)}")
 
+# test_model remains unchanged
 def test_model(model, dataloader, criterion, device):
-  model.eval()
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
     
-  running_loss = 0.0
-  correct = 0
-  total = 0
-    
-  with torch.inference_mode():
-      for inputs, labels in dataloader:
-          
-          inputs, labels = inputs.to(device), labels.to(device)
-          
-          outputs = model(inputs)
-          
-          loss = criterion(outputs, labels)
-          
-          running_loss += loss.item()
-          
-          _, predicted = torch.max(outputs.data, 1)
-          
-          total += labels.size(0)
-          
-          correct += (predicted == labels).sum().item()
-          
-  accuracy = 100 * correct / total
-    
-  print(f"Test Loss: {running_loss/len(dataloader)}, Accuracy: {accuracy}%")
+    with torch.inference_mode():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            
+            running_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+            
+    accuracy = 100 * correct / total
+    print(f"Test Loss: {running_loss/len(dataloader)}, Accuracy: {accuracy}%")
 
 
 # ## Model Training
 
 # ### Create Loss function and Optimizer
 
-# In[33]:
+# In[34]:
 
 
 loss_fn = nn.CrossEntropyLoss().to(device)
@@ -521,45 +541,55 @@ optimizer = torch.optim.Adam(tumor_classifier_resnet_0.parameters(), lr=0.001)
 
 # ### Train the model
 
-# In[34]:
-
-
-# train_model(tumor_classifier_resnet_0, train_MRI_dataloader, loss_fn, optimizer, device, num_epochs=10)
-
-
-# ### Test the model
+# #### First Training
 
 # In[35]:
 
 
-# test_model(tumor_classifier_resnet_0, test_MRI_dataloader, loss_fn, device)
+train_model(tumor_classifier_resnet_0, train_MRI_dataloader, loss_fn, device, num_epochs=10, lr=0.001)
 
 
-# ### Save the model
+# #### Second Training
+
+# In[35]:
+
+
+train_model(tumor_classifier_resnet_0, train_MRI_dataloader, loss_fn, device, num_epochs=10, lr=0.0001)
+
+
+# ### Test the model
 
 # In[36]:
 
 
-# save_file(tumor_classifier_resnet_0.state_dict(), "tumor_classifier_resnet_2v9.safetensors")
+test_model(tumor_classifier_resnet_0, test_MRI_dataloader, loss_fn, device)
+
+
+# ### Save the model
+
+# In[37]:
+
+
+save_file(tumor_classifier_resnet_0.state_dict(), "tumor_classifier_resnet_0v1.safetensors")
 
 
 # ## Model evaluation
 
 # ### load the model
 
-# In[37]:
+# In[ ]:
 
 
-resnet50_MRI = make_modified_resnet50(device, load=True, statedict="Trained Models/tumor_classifier_resnet_2v7.safetensors")
+# resnet50_MRI = make_modified_resnet50(device, load=True, statedict="Trained Models/tumor_classifier_resnet_2v7.safetensors")
 
 
-# In[38]:
+# In[ ]:
 
 
-test_model(resnet50_MRI, test_MRI_dataloader, loss_fn, device)
+# test_model(resnet50_MRI, test_MRI_dataloader, loss_fn, device)
 
 
-# In[41]:
+# In[ ]:
 
 
 from sklearn.metrics import confusion_matrix, classification_report
@@ -610,19 +640,19 @@ def print_confusion_matrix(model, test_dataloader, train_dataloader, device):
     print("Overlap between train/test:", len(set(train_files) & set(test_files)))
 
 
-# In[42]:
+# In[ ]:
 
 
-print_confusion_matrix(resnet50_MRI, train_MRI_dataloader, train_MRI_dataloader, device)
+print_confusion_matrix(tumor_classifier_resnet_0, train_MRI_dataloader, train_MRI_dataloader, device)
 
 
-# In[43]:
+# In[ ]:
 
 
 inspect_data(path)
 
 
-# In[44]:
+# In[ ]:
 
 
 def check_mri_leakage(mri_split_path):
@@ -682,11 +712,17 @@ MRI_split_path = path / 'Dataset' / 'MRI Split'
 inspect_data(MRI_split_path)
 
 
-# In[45]:
+# In[ ]:
 
 
 check_mri_leakage(MRI_split_path)
 check_mri_content_leakage(MRI_split_path)
+
+
+# In[ ]:
+
+
+
 
 
 # In[ ]:
