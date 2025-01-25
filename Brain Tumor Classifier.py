@@ -235,6 +235,13 @@ len(train_MRI), len(test_MRI)
 
 # ### Make a new directory containing the splitted data
 
+# In[ ]:
+
+
+# Change the base path to a writable directory
+# base_path = Path("/kaggle/working")  # Use Kaggle's writable directory
+
+
 # In[20]:
 
 
@@ -475,12 +482,12 @@ def make_modified_resnet50(device, load=False, statedict=None):
     
     return model
     
-tumor_classifier_resnet_0 = make_modified_resnet50(device)
+# tumor_classifier_resnet_0 = make_modified_resnet50(device)
 
 
 # ## Create Training and Testing functions
 
-# In[33]:
+# In[61]:
 
 
 def train_model(model, dataloader, criterion, device, num_epochs=10, lr=0.001):
@@ -525,18 +532,18 @@ def test_model(model, dataloader, criterion, device):
             correct += (predicted == labels).sum().item()
             
     accuracy = 100 * correct / total
-    print(f"Test Loss: {running_loss/len(dataloader)}, Accuracy: {accuracy}%")
+    print(f"Test Loss: {round(running_loss/len(dataloader), 4)}, Accuracy: {accuracy}%")
 
 
 # ## Model Training
 
 # ### Create Loss function and Optimizer
 
-# In[34]:
+# In[57]:
 
 
 loss_fn = nn.CrossEntropyLoss().to(device)
-optimizer = torch.optim.Adam(tumor_classifier_resnet_0.parameters(), lr=0.001)
+# optimizer = torch.optim.Adam(tumor_classifier_resnet_0.parameters(), lr=0.001)
 
 
 # ### Train the model
@@ -546,50 +553,50 @@ optimizer = torch.optim.Adam(tumor_classifier_resnet_0.parameters(), lr=0.001)
 # In[35]:
 
 
-train_model(tumor_classifier_resnet_0, train_MRI_dataloader, loss_fn, device, num_epochs=10, lr=0.001)
+# train_model(tumor_classifier_resnet_0, train_MRI_dataloader, loss_fn, device, num_epochs=10, lr=0.001)
 
 
 # #### Second Training
 
-# In[35]:
+# In[36]:
 
 
-train_model(tumor_classifier_resnet_0, train_MRI_dataloader, loss_fn, device, num_epochs=10, lr=0.0001)
+# train_model(tumor_classifier_resnet_0, train_MRI_dataloader, loss_fn, device, num_epochs=10, lr=0.0001)
 
 
 # ### Test the model
 
-# In[36]:
+# In[37]:
 
 
-test_model(tumor_classifier_resnet_0, test_MRI_dataloader, loss_fn, device)
+# test_model(tumor_classifier_resnet_0, test_MRI_dataloader, loss_fn, device)
 
 
 # ### Save the model
 
-# In[37]:
+# In[38]:
 
 
-save_file(tumor_classifier_resnet_0.state_dict(), "tumor_classifier_resnet_0v1.safetensors")
+# save_file(tumor_classifier_resnet_0.state_dict(), "tumor_classifier_resnet_0v1.safetensors")
 
 
 # ## Model evaluation
 
 # ### load the model
 
-# In[ ]:
+# In[62]:
 
 
-# resnet50_MRI = make_modified_resnet50(device, load=True, statedict="Trained Models/tumor_classifier_resnet_2v7.safetensors")
+resnet50_MRI = make_modified_resnet50(device, load=True, statedict="Trained Models/tumor_classifier_resnet_0v4.safetensors")
 
 
-# In[ ]:
+# In[63]:
 
 
-# test_model(resnet50_MRI, test_MRI_dataloader, loss_fn, device)
+test_model(resnet50_MRI, test_MRI_dataloader, loss_fn, device)
 
 
-# In[ ]:
+# In[41]:
 
 
 from sklearn.metrics import confusion_matrix, classification_report
@@ -633,26 +640,21 @@ def print_confusion_matrix(model, test_dataloader, train_dataloader, device):
 
     # Check test set class distribution
     print("Test set class counts:", np.bincount(test_dataloader.dataset.targets))
-    
-    # Check for duplicate samples between train/test sets
-    train_files = [os.path.basename(x[0]) for x in train_dataloader.dataset.samples]
-    test_files = [os.path.basename(x[0]) for x in test_dataloader.dataset.samples]
-    print("Overlap between train/test:", len(set(train_files) & set(test_files)))
 
 
-# In[ ]:
+# In[64]:
 
 
-print_confusion_matrix(tumor_classifier_resnet_0, train_MRI_dataloader, train_MRI_dataloader, device)
+print_confusion_matrix(resnet50_MRI, train_MRI_dataloader, train_MRI_dataloader, device)
 
 
-# In[ ]:
+# In[43]:
 
 
-inspect_data(path)
+# inspect_data(path)
 
 
-# In[ ]:
+# In[44]:
 
 
 def check_mri_leakage(mri_split_path):
@@ -708,27 +710,55 @@ def check_mri_content_leakage(mri_split_path):
 
 
 
-MRI_split_path = path / 'Dataset' / 'MRI Split'
-inspect_data(MRI_split_path)
+# MRI_split_path = path / 'Dataset' / 'MRI Split'
+# inspect_data(MRI_split_path)
 
 
-# In[ ]:
+# In[45]:
 
 
-check_mri_leakage(MRI_split_path)
-check_mri_content_leakage(MRI_split_path)
+# check_mri_leakage(MRI_split_path)
+# check_mri_content_leakage(MRI_split_path)
 
 
-# In[ ]:
+# In[46]:
+
+
+from collections import defaultdict
+
+def count_classes(dataloader):
+    counts = defaultdict(int)
+    for batch in dataloader:
+        # Extract labels from the batch (adjust based on your dataset structure)
+        inputs, labels = batch  # Assumes batch is (inputs, labels)
+        
+        # Move labels to CPU if they're on GPU
+        labels = labels.cpu()
+        
+        # Get unique classes and their counts in the current batch
+        unique_labels, counts_per_label = torch.unique(labels, return_counts=True)
+        
+        # Update the total counts
+        for label, count in zip(unique_labels, counts_per_label):
+            counts[int(label)] += int(count)
+    
+    return counts
 
 
 
+# In[54]:
 
 
-# In[ ]:
+count_classes(dataloader=train_MRI_dataloader)
 
 
+# In[53]:
 
+
+from collections import Counter
+
+
+Counter(test_MRI_dataset.targets)
 
 
 # In[ ]:
